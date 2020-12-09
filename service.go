@@ -3,6 +3,7 @@ package gousupostgres
 import (
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/indece-official/go-gousu"
@@ -51,12 +52,12 @@ type IService interface {
 
 // Service provides the interaction with the postgresql database
 type Service struct {
-	error        error
-	log          *gousu.Log
-	db           *sql.DB
-	options      *Options
-	reconnected  chan error
-	reconnecting bool
+	error                error
+	log                  *gousu.Log
+	db                   *sql.DB
+	options              *Options
+	waitGroupReconnected sync.WaitGroup
+	reconnecting         bool
 }
 
 var _ IService = (*Service)(nil)
@@ -78,10 +79,20 @@ func (s *Service) connect() error {
 	var err error
 
 	if s.reconnecting {
-		return <-s.reconnected
+		s.waitGroupReconnected.Wait()
+		if s.db == nil {
+			return fmt.Errorf("No connection accomplished")
+		}
+
+		return nil
 	}
 
 	s.reconnecting = true
+	s.waitGroupReconnected.Add(1)
+	defer func() {
+		s.reconnecting = false
+		s.waitGroupReconnected.Done()
+	}()
 
 	if s.db != nil {
 		s.log.Infof("Disconnecting from postgres database on %s:%d ...", *postgresHost, *postgresPort)
@@ -103,9 +114,6 @@ func (s *Service) connect() error {
 			if err == nil {
 				s.log.Infof("Connected to postgres database on %s:%d", *postgresHost, *postgresPort)
 
-				s.reconnecting = false
-				s.reconnected <- nil
-
 				return nil
 			}
 		}
@@ -115,9 +123,6 @@ func (s *Service) connect() error {
 		time.Sleep(time.Second * time.Duration(*postgresRetryInterval))
 		retries++
 	}
-
-	s.reconnecting = false
-	s.reconnected <- err
 
 	return err
 }
@@ -229,7 +234,6 @@ func NewServiceBase(ctx gousu.IContext, options *Options) *Service {
 	return &Service{
 		options:      options,
 		log:          gousu.GetLogger(fmt.Sprintf("service.%s", ServiceName)),
-		reconnected:  make(chan error),
 		reconnecting: false,
 	}
 }
