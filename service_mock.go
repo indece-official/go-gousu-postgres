@@ -10,8 +10,10 @@ import (
 type MockService struct {
 	gousu.MockService
 
-	GetDBFunc       func() *sql.DB
-	GetDBFuncCalled int
+	GetDBFunc           func() *sql.DB
+	GetDBSafeFunc       func() (*sql.DB, error)
+	GetDBFuncCalled     int
+	GetDBSafeFuncCalled int
 }
 
 // MockService implements IService
@@ -22,6 +24,13 @@ func (s *MockService) GetDB() *sql.DB {
 	s.GetDBFuncCalled++
 
 	return s.GetDBFunc()
+}
+
+// GetDBSafe calls GetDBSafeFunc and increases GetDBSafeFuncCalled
+func (s *MockService) GetDBSafe() (*sql.DB, error) {
+	s.GetDBSafeFuncCalled++
+
+	return s.GetDBSafeFunc()
 }
 
 // NewMockService creates a new initialized instance of MockService
@@ -36,6 +45,8 @@ func NewMockService() *MockService {
 		GetDBFunc: func() *sql.DB {
 			return &sql.DB{}
 		},
-		GetDBFuncCalled: 0,
+		GetDBSafeFunc: func() (*sql.DB, error) {
+			return &sql.DB{}, nil
+		},
 	}
 }

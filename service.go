@@ -46,14 +46,17 @@ type IService interface {
 	gousu.IService
 
 	GetDB() *sql.DB
+	GetDBSafe() (*sql.DB, error)
 }
 
 // Service provides the interaction with the postgresql database
 type Service struct {
-	error   error
-	log     *gousu.Log
-	db      *sql.DB
-	options *Options
+	error        error
+	log          *gousu.Log
+	db           *sql.DB
+	options      *Options
+	reconnected  chan error
+	reconnecting bool
 }
 
 var _ IService = (*Service)(nil)
@@ -71,17 +74,25 @@ func (s *Service) Name() string {
 	return ServiceName
 }
 
-// GetDB returns the postgres db connection
-func (s *Service) GetDB() *sql.DB {
-	return s.db
-}
-
-// Start initializes the connection to the postgres database and executed both setup.sql and update.sql
-// after connecting
-func (s *Service) Start() error {
+func (s *Service) connect() error {
 	var err error
 
-	s.error = nil
+	if s.reconnecting {
+		return <-s.reconnected
+	}
+
+	s.reconnecting = true
+	defer func() {
+		s.reconnecting = false
+		s.reconnected <- err
+	}()
+
+	if s.db != nil {
+		s.log.Infof("Disconnecting from postgres database on %s:%d ...", *postgresHost, *postgresPort)
+
+		s.db.Close()
+		s.db = nil
+	}
 
 	connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", *postgresUser, *postgresPassword, *postgresHost, *postgresPort, *postgresDatabase)
 
@@ -90,13 +101,13 @@ func (s *Service) Start() error {
 	for retries < *postgresMaxRetries {
 		s.log.Infof("Connecting to postgres database on %s:%d ...", *postgresHost, *postgresPort)
 
-		s.db, s.error = sql.Open("postgres", connStr)
-		if s.error == nil {
-			s.error = s.db.Ping()
+		s.db, err = sql.Open("postgres", connStr)
+		if err == nil {
+			err = s.db.Ping()
 			if s.error == nil {
 				s.log.Infof("Connected to postgres database on %s:%d", *postgresHost, *postgresPort)
 
-				break
+				return nil
 			}
 		}
 
@@ -106,8 +117,38 @@ func (s *Service) Start() error {
 		retries++
 	}
 
+	return err
+}
+
+// GetDB returns the postgres db connection
+//
+// Deprecated: Use GetDBSafe() instead
+func (s *Service) GetDB() *sql.DB {
+	return s.db
+}
+
+// GetDBSafe returns the postgres db connection after verifying it is alive
+func (s *Service) GetDBSafe() (*sql.DB, error) {
+	err := s.db.Ping()
+	if err != nil {
+		err = s.connect()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return s.db, nil
+}
+
+// Start initializes the connection to the postgres database and executed both setup.sql and update.sql
+// after connecting
+func (s *Service) Start() error {
+	var err error
+
+	s.error = s.connect()
+
 	if s.error != nil {
-		s.log.Errorf("Can't connect to postgres on %s:%d after %d attempts: %s", *postgresHost, *postgresPort, retries, s.error)
+		s.log.Errorf("Can't connect to postgres on %s:%d after %d attempts: %s", *postgresHost, *postgresPort, *postgresMaxRetries, err)
 
 		return s.error
 	}
@@ -171,7 +212,9 @@ func NewServiceBase(ctx gousu.IContext, options *Options) *Service {
 	}
 
 	return &Service{
-		options: options,
-		log:     gousu.GetLogger(fmt.Sprintf("service.%s", ServiceName)),
+		options:      options,
+		log:          gousu.GetLogger(fmt.Sprintf("service.%s", ServiceName)),
+		reconnected:  make(chan error),
+		reconnecting: false,
 	}
 }
