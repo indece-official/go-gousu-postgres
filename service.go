@@ -82,10 +82,6 @@ func (s *Service) connect() error {
 	}
 
 	s.reconnecting = true
-	defer func() {
-		s.reconnecting = false
-		s.reconnected <- err
-	}()
 
 	if s.db != nil {
 		s.log.Infof("Disconnecting from postgres database on %s:%d ...", *postgresHost, *postgresPort)
@@ -104,18 +100,24 @@ func (s *Service) connect() error {
 		s.db, err = sql.Open("postgres", connStr)
 		if err == nil {
 			err = s.db.Ping()
-			if s.error == nil {
+			if err == nil {
 				s.log.Infof("Connected to postgres database on %s:%d", *postgresHost, *postgresPort)
+
+				s.reconnecting = false
+				s.reconnected <- nil
 
 				return nil
 			}
 		}
 
-		s.log.Errorf("Can't connect to postgres on %s:%d: %s", *postgresHost, *postgresPort, s.error)
+		s.log.Errorf("Can't connect to postgres on %s:%d: %s", *postgresHost, *postgresPort, err)
 
 		time.Sleep(time.Second * time.Duration(*postgresRetryInterval))
 		retries++
 	}
+
+	s.reconnecting = false
+	s.reconnected <- err
 
 	return err
 }
@@ -129,12 +131,25 @@ func (s *Service) GetDB() *sql.DB {
 
 // GetDBSafe returns the postgres db connection after verifying it is alive
 func (s *Service) GetDBSafe() (*sql.DB, error) {
-	err := s.db.Ping()
+	var err error
+
+	if s.db == nil {
+		err = s.connect()
+		if err != nil {
+			return nil, err
+		}
+
+		return s.db, nil
+	}
+
+	err = s.db.Ping()
 	if err != nil {
 		err = s.connect()
 		if err != nil {
 			return nil, err
 		}
+
+		return s.db, nil
 	}
 
 	return s.db, nil
