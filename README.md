@@ -15,5 +15,5 @@ Full docu for go-gousu on https://github.com/indece-official/go-gousu
 | _postgres\_database_ | _POSTGRES\_DATABASE_ | string | "" | Database to use on db server |
 | _postgres\_max\_retries_ | _POSTGRES\_MAX\_RETRIES_ | int | 10 | Max number of retries before connecting to db fails  |
 | _postgres\_retry\_interval_ | _POSTGRES\_RETRY\_INTERVAL_ | int | 6 | Interval in seconds between retrying to connect to db |
-
-**TODO**
+| _postgres\_max\_idle\_conns_ | _POSTGRES\_MAX\_IDLE\_CONNS_ | int | 0 | Maximum number of idle connections (0 is unlimited) |
+| _postgres\_max\_open\_conns_ | _POSTGRES\_MAX\_OPEN\_CONNS_ | int | 0 | Maximum number of open connections (0 is unlimited) |

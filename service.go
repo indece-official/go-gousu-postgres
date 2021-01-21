@@ -25,6 +25,8 @@ var (
 	postgresDatabase      = flag.String("postgres_database", "", "")
 	postgresMaxRetries    = flag.Int("postgres_max_retries", 10, "")
 	postgresRetryInterval = flag.Int("postgres_retry_interval", 6, "")
+	postgresMaxIdleConns  = flag.Int("postgres_max_idle_conns", 0, "")
+	postgresMaxOpenConns  = flag.Int("postgres_max_open_conns", 0, "")
 )
 
 // Options can contain parameters passed to the postgres service
@@ -110,6 +112,9 @@ func (s *Service) connect() error {
 
 		s.db, err = sql.Open("postgres", connStr)
 		if err == nil {
+			s.db.SetMaxIdleConns(*postgresMaxIdleConns)
+			s.db.SetMaxOpenConns(*postgresMaxOpenConns)
+
 			err = s.db.Ping()
 			if err == nil {
 				s.log.Infof("Connected to postgres database on %s:%d", *postgresHost, *postgresPort)
