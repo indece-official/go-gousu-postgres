@@ -42,6 +42,9 @@ type Options struct {
 	// GetDBRevisionSQL can be used for retrieving the revision of the database
 	// used, must return/select one integer field
 	GetDBRevisionSQL string
+
+	// OpenFunc can be used to override the default sql.Open
+	OpenFunc func(driverName string, dataSourceName string) (*sql.DB, error)
 }
 
 // IService defined the interface of the postgresql database service
@@ -80,6 +83,12 @@ func (s *Service) Name() string {
 func (s *Service) connect() error {
 	var err error
 
+	openFunc := sql.Open
+
+	if s.options != nil && s.options.OpenFunc != nil {
+		openFunc = s.options.OpenFunc
+	}
+
 	if s.reconnecting {
 		s.waitGroupReconnected.Wait()
 		if s.db == nil {
@@ -110,7 +119,7 @@ func (s *Service) connect() error {
 	for retries < *postgresMaxRetries {
 		s.log.Infof("Connecting to postgres database on %s:%d ...", *postgresHost, *postgresPort)
 
-		s.db, err = sql.Open("postgres", connStr)
+		s.db, err = openFunc("postgres", connStr)
 		if err == nil {
 			s.db.SetMaxIdleConns(*postgresMaxIdleConns)
 			s.db.SetMaxOpenConns(*postgresMaxOpenConns)
